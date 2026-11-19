@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>학문 연결 지도</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Noto+Sans+KR:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<style>
+:root{--bg:#0e1424;--ink:#e8ecf5;--dim:#8d97b3;--line:#3a4668;--panel:#151c32;--rule:#2a3454}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font-family:"Noto Sans KR",system-ui,sans-serif;display:flex;overflow:hidden}
+#map{flex:1;position:relative;min-width:0}
+svg{width:100%;height:100%;display:block;cursor:grab}
+svg:active{cursor:grabbing}
+h1{position:absolute;left:24px;top:18px;margin:0;font:700 26px "Gowun Batang",serif;letter-spacing:.02em;pointer-events:none}
+h1 small{display:block;font:400 13px "Noto Sans KR",sans-serif;color:var(--dim);margin-top:4px;letter-spacing:0}
+#legend{position:absolute;left:24px;bottom:18px;display:flex;flex-wrap:wrap;gap:6px 14px;max-width:420px;font-size:12px;color:var(--dim)}
+#legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}
+aside{width:340px;background:var(--panel);border-left:1px solid var(--rule);padding:24px 22px;overflow:auto}
+aside h2{font:700 21px/1.35 "Gowun Batang",serif;margin:0 0 4px}
+aside .sub{color:var(--dim);font-size:13px;margin:0 0 16px}
+aside ul{list-style:none;margin:0;padding:0}
+aside li{padding:11px 0;border-top:1px solid var(--rule);font-size:14px;line-height:1.6}
+aside li b{display:block;font-weight:500}
+aside li span{color:var(--dim)}
+aside button{all:unset;cursor:pointer;display:block;width:100%;padding:11px 0;border-top:1px solid var(--rule);font-size:14px}
+aside button:hover,aside button:focus-visible{color:#fff;background:#1d2646}
+aside button em{font-style:normal;color:var(--dim);font-size:12px;float:right}
+.node{cursor:pointer}
+.node text{font:500 13px "Noto Sans KR",sans-serif;fill:var(--ink);paint-order:stroke;stroke:var(--bg);stroke-width:4px;stroke-linejoin:round;pointer-events:none}
+.node circle{stroke:var(--bg);stroke-width:2px}
+.link{stroke:var(--line);fill:none}
+.hit{stroke:transparent;stroke-width:14px;cursor:pointer}
+.dim{opacity:.12}
+.node,.link{transition:opacity .2s}
+@media(max-width:760px){body{flex-direction:column}aside{width:100%;height:42%;border-left:0;border-top:1px solid var(--rule)}h1{font-size:20px;left:16px}#legend{left:16px;max-width:92%}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div id="map">
+  <h1>학문 연결 지도<small>점이나 선을 눌러 연결고리를 확인하세요. 끌어서 옮기고, 휠로 확대할 수 있어요.</small></h1>
+  <svg id="svg" role="img" aria-label="학문 간 연결 그래프"></svg>
+  <div id="legend"></div>
+</div>
+<aside id="panel" aria-live="polite"></aside>
+
+<script>
+const COLOR={물리:"#7fb4ff",화학:"#ffb454",생명:"#7fe0a0",우주:"#c39bff",경제:"#ff8fa3",공학:"#e6e08a",수학:"#9fe3e0"};
+
+// 학문 노드: [이름, 분야]
+const nodes=[
+["양자역학","물리"],["핵물리학","물리"],["입자물리학","물리"],["상대성이론","물리"],["열역학","물리"],["통계역학","물리"],
+["빅뱅이론","우주"],["블랙홀","우주"],
+["화학","화학"],
+["생물학","생명"],["면역학","생명"],
+["재료역학","공학"],["유체역학","공학"],
+["거시경제","경제"],["미시경제","경제"],
+["수학","수학"]
+].map(([id,f])=>({id,f}));
+
+// 연결: [A, B, ["제목|설명", ...]]  ← 여기에 계속 추가하면 됩니다
+const edges=[
+["양자역학","핵물리학",["양자 터널링|알파 붕괴는 핵 장벽을 터널링으로 빠져나오는 현상","핵껍질 모형|핵자도 에너지 준위와 마법수를 가짐","핵스핀과 NMR|핵의 스핀과 자기모멘트가 핵자기공명의 바탕","베타 붕괴|약한 상호작용을 양자론으로 기술한 페르미 이론"]],
+["양자역학","화학",["원자 오비탈|슈뢰딩거 방정식의 해가 전자 배치와 주기율표를 설명","분자 오비탈|공유결합, 결합 차수, 극성의 근거","분광학|에너지 준위 전이가 흡수·방출 스펙트럼을 결정","계산화학|DFT, 하트리-폭 계산으로 분자 구조와 반응성 예측"]],
+["화학","재료역학",["결합 에너지|원자 간 결합 세기가 탄성계수와 녹는점으로 이어짐","결정 구조와 결함|전위의 이동이 소성 변형과 강도를 결정","고분자 사슬|사슬 길이와 가교 정도가 인성과 점탄성을 좌우","부식과 피로|전기화학 반응이 균열을 키우고 수명을 단축"]],
+["화학","유체역학",["점성과 레올로지|분자 구조가 흐름에 대한 저항을 결정","반응-확산-대류|반응기 설계의 핵심 방정식","연소|화학 반응열과 난류 흐름의 결합","계면장력|분자 간 힘이 액적, 거품, 모세관 현상을 지배"]],
+["화학","생물학",["생체분자|단백질, 핵산, 지질의 구조와 반응","효소 촉매|활성화 에너지를 낮춰 생체 반응 속도를 조절","대사 경로|에너지 변환이 연쇄 화학 반응으로 이루어짐","약물 설계|분자와 수용체의 결합이 약효를 결정"]],
+["생물학","면역학",["항원과 항체|분자 인식의 특이성에 기반한 방어","면역세포 분화|조혈줄기세포에서 T세포와 B세포로 분화","백신|기억 면역을 이용한 감염 예방","자가면역과 염증|자기와 비자기 구별의 실패"]],
+["거시경제","미시경제",["미시적 기초|거시 모형도 가계와 기업의 최적화에서 출발","합성의 오류|개인에게 합리적인 행동이 전체에서는 역효과(절약의 역설)","일반균형|모든 시장을 동시에 보는 분석 틀","가격 경직성|정보 비대칭과 메뉴 비용으로 설명하는 새 케인지언 모형"]],
+["상대성이론","양자역학",["디랙 방정식|두 이론을 결합해 전자 스핀과 반물질을 예측","양자장론|입자를 장의 들뜸으로 기술","양자 중력 문제|시공간 곡률과 불확정성이 충돌하는 지점","시간 팽창|뮤온 수명 연장 등 입자 실험으로 확인"]],
+["양자역학","빅뱅이론",["인플레이션과 양자 요동|우주 거대 구조의 씨앗","우주배경복사|요동의 흔적이 CMB 비등방성으로 남음","대칭 깨짐|초기 우주의 양자장 상전이로 입자 질량 생성"]],
+["빅뱅이론","블랙홀",["특이점|일반상대론 해에서 두 경우 모두 특이점이 등장","원시 블랙홀|초기 우주의 밀도 요동에서 생성 가능","엔트로피|초기 우주의 낮은 엔트로피와 블랙홀 엔트로피"]],
+["상대성이론","블랙홀",["슈바르츠실트 해|사건의 지평선과 특이점의 첫 해석","중력파|블랙홀 병합이 시공간 물결로 관측됨"]],
+["양자역학","블랙홀",["호킹 복사|지평선 근처 양자효과로 블랙홀이 복사","정보 역설|증발 후 정보가 사라지는가 하는 문제"]],
+["열역학","블랙홀",["블랙홀 열역학|질량, 면적, 온도, 엔트로피가 열역학 법칙과 대응"]],
+["상대성이론","빅뱅이론",["프리드만 방정식|일반상대론으로 우주 팽창을 기술","적색편이|허블 법칙과 팽창 우주의 관측 증거"]],
+["핵물리학","빅뱅이론",["빅뱅 핵합성|초기 3분간 수소, 헬륨, 리튬이 만들어짐","원소 존재비|헬륨 비율이 우주 모형을 검증"]],
+["핵물리학","입자물리학",["강한 상호작용|쿼크와 글루온이 핵력의 근원","핵 구조와 QCD|핵자 내부 구조를 다루는 이론"]],
+["양자역학","입자물리학",["표준모형|양자장론으로 기술한 기본 입자와 힘","대칭성|게이지 대칭이 상호작용을 결정"]],
+["양자역학","통계역학",["양자 통계|보스-아인슈타인, 페르미-디랙 분포","분배함수|양자 에너지 준위에서 열적 성질 계산"]],
+["통계역학","열역학",["미시와 거시|입자 상태의 평균이 온도와 압력이 됨","엔트로피|볼츠만의 미시 상태 수 정의"]],
+["열역학","화학",["화학평형|깁스 자유에너지가 반응 방향을 결정","반응열|엔탈피로 흡열·발열 반응 설명"]],
+["재료역학","유체역학",["유체-구조 상호작용|교량 플러터와 혈관벽 변형처럼 흐름과 변형이 서로 영향"]],
+["수학","양자역학",["힐베르트 공간|상태와 연산자의 수학적 틀","선형대수|고유값 문제가 측정과 에너지 준위에 대응"]],
+["수학","상대성이론",["미분기하학|곡률과 텐서로 중력을 기술"]],
+["수학","미시경제",["최적화|효용 극대화와 비용 최소화","게임이론|전략적 상호작용의 균형 분석"]]
+].map(([a,b,t])=>({source:a,target:b,items:t.map(s=>s.split("|"))}));
+
+// 범례
+document.getElementById("legend").innerHTML=Object.entries(COLOR).map(([k,c])=>`<span><i style="background:${c}"></i>${k}</span>`).join("");
+
+const svg=d3.select("#svg"), g=svg.append("g"), panel=document.getElementById("panel");
+svg.call(d3.zoom().scaleExtent([.4,3]).on("zoom",e=>g.attr("transform",e.transform)));
+
+const deg={};edges.forEach(e=>{deg[e.source]=(deg[e.source]||0)+1;deg[e.target]=(deg[e.target]||0)+1});
+nodes.forEach(n=>n.r=8+(deg[n.id]||0)*1.7);
+
+const sim=d3.forceSimulation(nodes)
+ .force("link",d3.forceLink(edges).id(d=>d.id).distance(120).strength(.5))
+ .force("charge",d3.forceManyBody().strength(-460))
+ .force("collide",d3.forceCollide(d=>d.r+22))
+ .force("x",d3.forceX().strength(.04)).force("y",d3.forceY().strength(.04));
+
+const link=g.append("g").selectAll("line").data(edges).join("line").attr("class","link")
+ .attr("stroke-width",d=>1+d.items.length*.6);
+const hit=g.append("g").selectAll("line").data(edges).join("line").attr("class","hit")
+ .on("click",(e,d)=>{e.stopPropagation();showEdge(d)});
+hit.append("title").text(d=>`${d.source.id||d.source} ↔ ${d.target.id||d.target}`);
+
+const node=g.append("g").selectAll("g").data(nodes).join("g").attr("class","node").attr("tabindex",0)
+ .on("click",(e,d)=>{e.stopPropagation();showNode(d)})
+ .on("keydown",(e,d)=>{if(e.key==="Enter")showNode(d)})
+ .call(d3.drag().on("start",(e,d)=>{if(!e.active)sim.alphaTarget(.3).restart();d.fx=d.x;d.fy=d.y})
+  .on("drag",(e,d)=>{d.fx=e.x;d.fy=e.y}).on("end",(e,d)=>{if(!e.active)sim.alphaTarget(0);d.fx=d.fy=null}));
+node.append("circle").attr("r",d=>d.r).attr("fill",d=>COLOR[d.f]);
+node.append("text").attr("y",d=>d.r+15).attr("text-anchor","middle").text(d=>d.id);
+
+function fit(){const r=svg.node().getBoundingClientRect();sim.force("x").x(0);sim.force("y").y(0);svg.call(d3.zoom().transform,d3.zoomIdentity.translate(r.width/2,r.height/2))}
+fit();addEventListener("resize",fit);
+
+sim.on("tick",()=>{
+ [link,hit].forEach(s=>s.attr("x1",d=>d.source.x).attr("y1",d=>d.source.y).attr("x2",d=>d.target.x).attr("y2",d=>d.target.y));
+ node.attr("transform",d=>`translate(${d.x},${d.y})`);
+});
+
+function focus(ids){
+ node.classed("dim",d=>ids&&!ids.has(d.id));
+ link.classed("dim",d=>ids&&!(ids.has(d.source.id)&&ids.has(d.target.id)&&d._on));
+}
+function mark(fn){edges.forEach(e=>e._on=fn(e))}
+
+function showEdge(e){
+ mark(x=>x===e);
+ focus(new Set([e.source.id,e.target.id]));
+ link.classed("dim",d=>d!==e);
+ panel.innerHTML=`<h2>${e.source.id} ↔ ${e.target.id}</h2><p class="sub">연결고리 ${e.items.length}개</p><ul>`+
+  e.items.map(([t,s])=>`<li><b>${t}</b><span>${s}</span></li>`).join("")+`</ul>`;
+}
+function showNode(n){
+ const rel=edges.filter(e=>e.source===n||e.target===n);
+ mark(e=>rel.includes(e));
+ focus(new Set([n.id,...rel.map(e=>e.source===n?e.target.id:e.source.id)]));
+ panel.innerHTML=`<h2>${n.id}</h2><p class="sub">${n.f} · 연결된 학문 ${rel.length}개</p>`+
+  rel.map((e,i)=>{const o=e.source===n?e.target:e.source;return `<button data-i="${i}"><em>${e.items.length}개</em>${o.id}</button>`}).join("");
+ panel.querySelectorAll("button").forEach(b=>b.onclick=()=>showEdge(rel[b.dataset.i]));
+}
+function home(){
+ mark(()=>false);focus(null);link.classed("dim",false);
+ panel.innerHTML=`<h2>학문 사이의 다리</h2><p class="sub">학문 ${nodes.length}개, 연결 ${edges.length}개</p><ul><li><b>보는 법</b><span>점을 누르면 그 학문과 이어진 학문이 강조되고, 선을 누르면 두 학문을 잇는 개념이 나옵니다. 선이 굵을수록 연결고리가 많습니다.</span></li></ul>`;
+}
+svg.on("click",home);home();
+</script>
+</body>
+</html>
